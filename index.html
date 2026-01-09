@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>超級李唐兄弟：激流泛舟篇</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: "Noto Serif TC", serif;
+            color: #ddd;
+            overflow: hidden;
+        }
+        #game-wrapper {
+            position: relative;
+            border: 10px solid #4e342e; /* 深木色邊框 */
+            box-shadow: 0 0 30px rgba(0,0,0,0.9);
+        }
+        canvas {
+            display: block;
+            background-color: #a7c6c6; /* 石綠色水底 */
+        }
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 18px;
+            color: #2e4e4e;
+            font-weight: bold;
+            text-shadow: 1px 1px 0 rgba(255,255,255,0.5);
+            pointer-events: none;
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(240, 230, 210, 0.95);
+            padding: 30px;
+            border: 4px double #333;
+            text-align: center;
+            color: #333;
+            display: none;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+        }
+        button {
+            background: #4e342e;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 15px;
+            font-family: inherit;
+        }
+        button:hover {
+            background: #6d4c41;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-wrapper">
+    <canvas id="raftCanvas" width="500" height="700"></canvas>
+    <div id="ui-layer">
+        <div>行程: <span id="distance">0</span> 里</div>
+        <div>墨寶: <span id="score">0</span></div>
+    </div>
+    <div id="game-over">
+        <h2 id="go-title">舟覆石間</h2>
+        <p id="go-msg">深邃山谷，急流兇險。</p>
+        <p>得分: <span id="final-score">0</span></p>
+        <button onclick="resetGame()">重新啟程</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('raftCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // --- 遊戲變數 ---
+    let gameState = 'playing'; // playing, gameover
+    let frameCount = 0;
+    let score = 0;
+    let distance = 0;
+    let speed = 4; // 水流速度
+
+    // 玩家 (竹筏)
+    const player = {
+        x: 250,
+        y: 550,
+        width: 30,
+        height: 50,
+        color: '#8d6e63' // 竹筏色
+    };
+
+    // 物件陣列
+    let rocks = [];
+    let items = []; // 墨寶
+    let waterLines = []; // 水流波紋裝飾
+
+    // 控制
+    const keys = { ArrowLeft: false, ArrowRight: false };
+
+    // 監聽鍵盤
+    window.addEventListener('keydown', e => {
+        if(keys.hasOwnProperty(e.code)) keys[e.code] = true;
+    });
+    window.addEventListener('keyup', e => {
+        if(keys.hasOwnProperty(e.code)) keys[e.code] = false;
+    });
+
+    // 初始化
+    function resetGame() {
+        gameState = 'playing';
+        score = 0;
+        distance = 0;
+        speed = 4;
+        rocks = [];
+        items = [];
+        waterLines = [];
+        player.x = 225;
+        document.getElementById('game-over').style.display = 'none';
+        
+        // 預先生成一些水紋
+        for(let i=0; i<20; i++) {
+            waterLines.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                len: 20 + Math.random() * 40,
+                speed: 1 + Math.random() * 2
+            });
+        }
+    }
+
+    // 生成障礙物 (斧劈皴岩石)
+    function spawnRock() {
+        const size = 40 + Math.random() * 50;
+        const x = Math.random() * (canvas.width - size);
+        rocks.push({
+            x: x,
+            y: -100, // 從上方生成
+            w: size,
+            h: size * 0.8,
+            type: 'rock'
+        });
+    }
+
+    // 生成道具 (墨寶)
+    function spawnItem() {
+        const x = 50 + Math.random() * (canvas.width - 100);
+        items.push({
+            x: x,
+            y: -50,
+            r: 10,
+            collected: false
+        });
+    }
+
+    // 繪圖：斧劈皴岩石 (呼應 PDF Page 1)
+    function drawAxeCutRock(r) {
+        ctx.fillStyle = '#2c3e50'; // 深墨色
+        ctx.beginPath();
+        // 繪製不規則多邊形模擬岩石
+        ctx.moveTo(r.x, r.y + r.h);
+        ctx.lineTo(r.x + r.w * 0.2, r.y);
+        ctx.lineTo(r.x + r.w * 0.6, r.y + r.h * 0.3);
+        ctx.lineTo(r.x + r.w, r.y + r.h * 0.1);
+        ctx.lineTo(r.x + r.w * 0.9, r.y + r.h);
+        ctx.fill();
+
+        // 斧劈筆觸 (白色/淺色皴擦)
+        ctx.strokeStyle = '#546e7a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(r.x + 10, r.y + r.h - 5);
+        ctx.lineTo(r.x + r.w * 0.3, r.y + 10);
+        ctx.stroke();
+    }
+
+    // 繪圖：玩家竹筏
+    function drawRaft() {
+        ctx.save();
+        ctx.translate(player.x + player.width/2, player.y + player.height/2);
+        
+        // 竹筏主體
+        ctx.fillStyle = '#d7ccc8';
+        ctx.fillRect(-player.width/2, -player.height/2, player.width, player.height);
+        
+        // 竹節紋路
+        ctx.strokeStyle = '#8d6e63';
+        ctx.beginPath();
+        ctx.moveTo(-player.width/2, -player.height/6);
+        ctx.lineTo(player.width/2, -player.height/6);
+        ctx.moveTo(-player.width/2, player.height/6);
+        ctx.lineTo(player.width/2, player.height/6);
+        ctx.stroke();
+
+        // 玩家小人 (紅點，象徵行旅)
+        ctx.fillStyle = '#b71c1c';
+        ctx.beginPath();
+        ctx.arc(0, 0, 8, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    // 繪圖：河岸 (青綠山水風格)
+    function drawBanks() {
+        // 左岸
+        ctx.fillStyle = '#388e3c'; // 石綠
+        ctx.fillRect(0, 0, 20, canvas.height);
+        // 右岸
+        ctx.fillStyle = '#388e3c';
+        ctx.fillRect(canvas.width - 20, 0, 20, canvas.height);
+    }
+
+    // 遊戲迴圈
+    function update() {
+        if (gameState !== 'playing') return;
+
+        frameCount++;
+        distance += 0.1;
+
+        // 難度隨距離增加
+        if (frameCount % 300 === 0) speed += 0.5;
+
+        // 玩家移動
+        if (keys.ArrowLeft) player.x -= 6;
+        if (keys.ArrowRight) player.x += 6;
+
+        // 邊界限制
+        if (player.x < 20) player.x = 20;
+        if (player.x + player.width > canvas.width - 20) player.x = canvas.width - 20 - player.width;
+
+        // 生成障礙與道具
+        if (frameCount % 60 === 0) spawnRock();
+        if (frameCount % 150 === 0) spawnItem();
+
+        // 更新水紋
+        if (frameCount % 10 === 0) {
+            waterLines.push({
+                x: Math.random() * canvas.width,
+                y: -50,
+                len: 20 + Math.random() * 40,
+                speed: speed + Math.random()
+            });
+        }
+
+        // 更新物件位置
+        rocks.forEach(r => r.y += speed);
+        items.forEach(i => i.y += speed);
+        waterLines.forEach(w => w.y += w.speed);
+
+        // 清理超出畫面的物件
+        rocks = rocks.filter(r => r.y < canvas.height + 100);
+        items = items.filter(i => i.y < canvas.height + 100);
+        waterLines = waterLines.filter(w => w.y < canvas.height + 100);
+
+        // 碰撞偵測
+        // 1. 岩石 (AABB 簡單判定)
+        for (let r of rocks) {
+            if (
+                player.x < r.x + r.w &&
+                player.x + player.width > r.x &&
+                player.y < r.y + r.h &&
+                player.y + player.height > r.y
+            ) {
+                gameOver();
+                return;
+            }
+        }
+
+        // 2. 道具
+        for (let i of items) {
+            if (!i.collected &&
+                player.x < i.x + i.r*2 &&
+                player.x + player.width > i.x &&
+                player.y < i.y + i.r*2 &&
+                player.y + player.height > i.y
+            ) {
+                i.collected = true;
+                score += 100;
+            }
+        }
+
+        // UI 更新
+        document.getElementById('distance').innerText = Math.floor(distance);
+        document.getElementById('score').innerText = score;
+    }
+
+    function draw() {
+        // 清空畫面
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 畫水流背景
+        ctx.fillStyle = '#81c784'; // 淺綠水色
+        ctx.globalAlpha = 0.3;
+        ctx.fillRect(20, 0, canvas.width - 40, canvas.height);
+        ctx.globalAlpha = 1.0;
+
+        // 畫動態水紋 (表現流動感)
+        ctx.strokeStyle = '#e0f2f1';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        waterLines.forEach(w => {
+            ctx.moveTo(w.x, w.y);
+            ctx.lineTo(w.x, w.y + w.len);
+        });
+        ctx.stroke();
+
+        // 畫河岸
+        drawBanks();
+
+        // 畫岩石
+        rocks.forEach(r => drawAxeCutRock(r));
+
+        // 畫道具 (卷軸造型)
+        items.forEach(i => {
+            if (!i.collected) {
+                ctx.fillStyle = '#fff9c4';
+                ctx.fillRect(i.x, i.y, 20, 10);
+                ctx.strokeStyle = '#5d4037';
+                ctx.strokeRect(i.x, i.y, 20, 10);
+            }
+        });
+
+        // 畫玩家
+        drawRaft();
+
+        requestAnimationFrame(() => {
+            update();
+            draw();
+        });
+    }
+
+    function gameOver() {
+        gameState = 'gameover';
+        document.getElementById('final-score').innerText = score;
+        document.getElementById('game-over').style.display = 'block';
+    }
+
+    // 啟動
+    resetGame();
+    draw();
+
+</script>
+</body>
+</html>
